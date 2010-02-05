@@ -2,6 +2,10 @@
 
 The wrapper adds asynchronicity and connection management.
 
+Changes in version 2.1 (development):
+- Wait for successful connection before dequeuing message.
+- Always attempt disconnection when publisher thread stops.
+
 Changes in version 2.0:
 - repackage so source root is not the same as svn root.
 - update to use stomp.py version 2.0.4.
@@ -15,11 +19,6 @@ Changes in version 2.0:
 - add _publisher_timestamp as header in publisher.send() (i.e. not in message)
 - publisher.send() simply passes the message body onto stomp.py, instead of
     accepting only dict and converting to string using repr().
-    N.B. To maintain compatibility with runcollector.py in
-    ganga/trunk/external/dashb/, the conversion of dict to string using repr()
-    has been moved up into MSGMS.py in Ganga/Lib/MonitoringServices/MSGMS/.
-    However runcollector.py still converts back to a dict using eval(), which
-    may be a security risk and should be fixed.
 """
 
 from publisher import createPublisher
