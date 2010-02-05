@@ -143,8 +143,8 @@ def createPublisher(T, server, port, user='', password='', logger=None,
                 while not self.message_queue.empty():
                     try:
                         self.__sending = True
-                        m = self.message_queue.get()
                         self._connect()
+                        m = self.message_queue.get()
                         self._send(m)
                     finally:
                         self.__sending = False
@@ -155,6 +155,8 @@ def createPublisher(T, server, port, user='', password='', logger=None,
                 # disconnect if idle_timeout exceeded
                 if idle_time >= self.idle_timeout > -1:
                     self._disconnect()
+            # disconnect (if connected)
+            self._disconnect()
 
         def should_stop(self):
             """Indicates whether stop() has been called."""
