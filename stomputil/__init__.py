@@ -2,9 +2,11 @@
 
 The wrapper adds asynchronicity and connection management.
 
-Changes in version 2.1 (development):
+Changes in version 2.1:
 - Wait for successful connection before dequeuing message.
 - Always attempt disconnection when publisher thread stops.
+- bug fix #62543 Exception in thread GANGA_Update_Thread_shutdown
+    https://savannah.cern.ch/bugs/?62543
 
 Changes in version 2.0:
 - repackage so source root is not the same as svn root.
@@ -23,4 +25,4 @@ Changes in version 2.0:
 
 from publisher import createPublisher
 
-__version__ = '2.0'
+__version__ = '2.1'

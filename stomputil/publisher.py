@@ -151,6 +151,10 @@ def createPublisher(T, server, port, user='', password='', logger=None,
                     idle_time = 0
                 # heart beat pause
                 time.sleep(BEAT_TIME)
+                # fix for bug #62543 https://savannah.cern.ch/bugs/?62543
+                if stomp is None:
+                    # python interpreter has torn down globals, exit directly
+                    return
                 idle_time += BEAT_TIME
                 # disconnect if idle_timeout exceeded
                 if idle_time >= self.idle_timeout > -1:
