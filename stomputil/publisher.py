@@ -3,6 +3,7 @@
 import logging
 import stomp
 import time
+from Queue import Queue
 
 
 BEAT_TIME = 0.3 # Seconds between publisher thread heart beats.
@@ -15,16 +16,16 @@ class LoggerListener(stomp.ConnectionListener):
     """Connection listener which logs STOMP events."""
 
     def __init__(self, logger):
-        self.logger = logger 
+        self._logger = logger 
 
     def on_connecting(self, host_and_port):
-        self.logger.debug('TCP/IP connected host=%s:%s.' % host_and_port)
+        self._logger.debug('TCP/IP connected host=%s.' % (host_and_port,))
 
     def on_connected(self, headers, body):
         self._log_frame('CONNECTED', headers, body)
 
     def on_disconnected(self):
-        self.logger.warning('TCP/IP connection lost.')
+        self._logger.warning('TCP/IP connection lost.')
 
     def on_message(self, headers, body):
         self._log_frame('MESSAGE', headers, body)
@@ -36,8 +37,8 @@ class LoggerListener(stomp.ConnectionListener):
         self._log_frame('ERROR', headers, body)
 
     def _log_frame(self, frame_type, headers, body):
-        if self.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug('STOMP %s frame received headers=%s body=%s.' % (frame_type, headers, body))
+        if self._logger.isEnabledFor(logging.DEBUG):
+            self._logger.debug('STOMP %s frame received headers=%s body=%s.' % (frame_type, headers, body))
 
 
 def createPublisher(T, server, port, user='', password='', logger=None,
@@ -75,20 +76,29 @@ def createPublisher(T, server, port, user='', password='', logger=None,
         """Asynchronous asynchronous publisher for sending messages to an MSG server."""
 
         def __init__(self):
-            T.__init__(self, name='AsyncStompPublisher')
+            T.__init__(self, name=('AsyncStompPublisher_%s:%s' % (server, port)))
             self.setDaemon(True)
+            # indicates that the publisher thread should exit
             self.__should_stop = False
-            self.__sending = False # indicates that publisher is currently sending
-            # create connection
-            self.connection = stomp.Connection([(server, port)], user, password)
-            self.logger = logger
-            # add logger listener to connection
-            if logger is not None:
-                self.connection.set_listener('logger', LoggerListener(logger))
+            self.__stop_timestamp = None
+            # indicates that publisher is currently sending
+            self.__sending = False
+            # connection
+            self._cx = None
+            # connection parameters
+            self._cx_params = ([(server, port)], user, password)
+            # logger
+            self._logger = logger
+            # indicates how long (seconds) the connection can idle
             self.idle_timeout = idle_timeout
-            # create queue to hold (message, headers, keyword_headers) tuples
-            from Queue import Queue
-            self.message_queue = Queue()
+            # indicates initial back-off time, multiplier and maximum time
+            # in case of connect/send error
+            # e.g retry after 5, 10, 20, 40, 60, 60, ... seconds
+            self.backoff_initial = 5
+            self.backoff_multiplier = 2
+            self.backoff_max = 60
+            # queue to hold (message, headers, keyword_headers) tuples
+            self._message_queue = Queue()
 
         def send(self, destination=None, message='', headers=None, **keyword_headers):
             """Add message to local queue for sending to MSG server.
@@ -104,6 +114,9 @@ def createPublisher(T, server, port, user='', password='', logger=None,
             Finally headers and keyword_headers are passed to stomp.py, which merges them.
             N.B. keyword_headers take precedence over headers.
             """
+            if self.should_stop():
+                self._log(logging.WARNING, 'Request to queue message during or after thread shutdown denied.')
+                return
             if headers is None:
                 headers = {}
             if destination is not None:
@@ -111,56 +124,100 @@ def createPublisher(T, server, port, user='', password='', logger=None,
             if not PUBLISHER_TIMESTAMP_HEADER in keyword_headers:
                 keyword_headers[PUBLISHER_TIMESTAMP_HEADER] = time.time()
             m = (message, headers, keyword_headers)
-            self._log(logging.DEBUG, 'Queuing message %s with headers %s and keyword_headers %s.' % m)
-            self.message_queue.put(m)
+            self._log(logging.DEBUG, 'Queuing message. body=%r headers=%r keyword_headers=%r.', *m)
+            self._message_queue.put(m)
+            self._log(logging.DEBUG, 'Message queued. %s queued message(s).', self._message_queue.qsize())
 
         def _send(self, (message, headers, keyword_headers)):
             """Send given message to MSG server."""
-            self._log(logging.DEBUG, 'Sending message %s with headers %s and keyword_headers %s.' % (message, headers, keyword_headers))
-            self.connection.send(message, headers, **keyword_headers)
+            self._log(logging.DEBUG, 'Sending message. body=%r headers=%r keyword_headers=%r.', message, headers, keyword_headers)
+            self._cx.send(message, headers, **keyword_headers)
+            self._log(logging.DEBUG, 'Sent message.')
 
         def _connect(self):
             """Connects to MSG server if not already connected."""
-            if not self.connection.is_connected():
+            cx = self._cx
+            if cx is None or not cx.is_connected():
                 self._log(logging.DEBUG, 'Connecting.')
-                self.connection.start()
-                self.connection.connect(wait=True)
+                # create connection
+                cx = stomp.Connection(*self._cx_params)
+                # add logger listener to connection
+                if self._logger is not None:
+                    cx.set_listener('logger', LoggerListener(self._logger))
+                cx.start()
+                cx.connect()
+                self._cx = cx
+                self._log(logging.DEBUG, 'Connected.')
 
         def _disconnect(self):
-            """Disconnects from MSG server if not already disconnected."""
-            if self.connection.is_connected():
-                self._log(logging.DEBUG, 'Disconnecting.')
-                self.connection.stop()
+            """Disconnects (quietly) from MSG server if not already disconnected."""
+            cx = self._cx
+            if cx is not None:
+                self._log(logging.DEBUG, 'Disconnecting')
+                self._cx = None
+                if cx.is_connected():
+                    try:
+                        cx.disconnect()
+                    except Exception:
+                        self._log(logging.WARNING, 'Exception on disconnect.', exc_info=True)
+                self._log(logging.DEBUG, 'Disconnected')
 
         def run(self):
             """Send messages, connecting as necessary and disconnecting after idle_timeout
             seconds.
             """
+            # indicates time in seconds since last connect/send attempt
             idle_time = 0
-            # keep running unless should_stop and queue empty
-            while not (self.should_stop() and self.message_queue.empty()):
-                # send while queue not empty
-                while not self.message_queue.empty():
-                    try:
-                        self.__sending = True
-                        self._connect()
-                        m = self.message_queue.get()
-                        self._send(m)
-                    finally:
-                        self.__sending = False
-                    idle_time = 0
+            # indicates time in seconds before next connect/send attempt
+            backoff_time = 0
+            # run unless should_stop and (queue empty or backing off)
+            while not (self.should_stop() and (self._message_queue.empty() or backoff_time > 0)):
+                # if idle_time exceeds backoff_time then attempt to connect/send
+                if idle_time >= backoff_time:
+                    # send unless queue empty
+                    while not self._message_queue.empty():
+                        try:
+                            self._log(logging.DEBUG, 'Before attempt to connect/send. %s queued message(s).', self._message_queue.qsize())
+                            self.__sending = True
+                            idle_time = 0
+                            m = None
+                            try:
+                                self._connect()
+                                m = self._message_queue.get()
+                                self._send(m)
+                                # reset backoff_time
+                                backoff_time = 0
+                            except Exception:
+                                self._log(logging.WARNING, 'Exception on connect/send.', exc_info=True)
+                                # increment backoff_time
+                                if backoff_time == 0:
+                                    backoff_time = self.backoff_initial
+                                else:
+                                    backoff_time = min(backoff_time * self.backoff_multiplier, self.backoff_max)
+                                self._log(logging.DEBUG, 'Back-off time set to %s seconds.', backoff_time)
+                                # re-queue message
+                                if m is not None:
+                                    self._log(logging.DEBUG, 'Re-queuing failed message. body=%r headers=%r keyword_headers=%r.', *m)
+                                    self._message_queue.put(m)
+                                break # break out to wait for BEAT_TIME
+                        finally:
+                            self.__sending = False
+                            self._log(logging.DEBUG, 'After attempt to connect/send. %s queued message(s).', self._message_queue.qsize())
                 # heart beat pause
                 time.sleep(BEAT_TIME)
                 # fix for bug #62543 https://savannah.cern.ch/bugs/?62543
+                # exit directly if python interpreter has torn down globals
                 if stomp is None:
-                    # python interpreter has torn down globals, exit directly
                     return
+                # increment idle_time
                 idle_time += BEAT_TIME
-                # disconnect if idle_timeout exceeded
+                # disconnect (quietly) if idle_timeout exceeded
                 if idle_time >= self.idle_timeout > -1:
                     self._disconnect()
-            # disconnect (if connected)
+            # disconnect (quietly)
             self._disconnect()
+            self._log(logging.DEBUG, 'Exit publisher. Local message queue size is %s.', self._message_queue.qsize())
+            self._log(logging.DEBUG, "Stopped: %s" % self.getName())
 
         def should_stop(self):
             """Indicates whether stop() has been called."""
@@ -172,7 +229,7 @@ def createPublisher(T, server, port, user='', password='', logger=None,
             Typically called on a managed thread such as GangaThread.
             """
             if not self.__should_stop:
-                self._log(logging.DEBUG, "Stopping: %s" % self.getName())
+                self._log(logging.DEBUG, "Stopping: %s.", self.getName())
                 self.__should_stop = True
 
         def addExitHandler(self, timeout=EXIT_TIMEOUT):
@@ -196,17 +253,18 @@ def createPublisher(T, server, port, user='', password='', logger=None,
             """
             self._log(logging.DEBUG, 'Finalizing.')
             finalize_time = 0
-            while not self.message_queue.empty() or self.__sending:
+            while not self._message_queue.empty() or self.__sending:
                 if finalize_time >= timeout > -1:
                     break
                 time.sleep(BEAT_TIME)
                 finalize_time += BEAT_TIME
-            self._log(logging.DEBUG, 'Finalized after %s second(s). Local queue size is %s.' % (finalize_time, self.message_queue.qsize()))
+            self._disconnect()
+            self._log(logging.DEBUG, 'Finalized after %s second(s). Local message queue size is %s.', finalize_time, self._message_queue.qsize())
 
-        def _log(self, level, msg):
+        def _log(self, level, msg, *args, **kwargs):
             """Log message if logger is defined."""
-            if self.logger is not None and self.logger.isEnabledFor(level):
-                self.logger.log(level, msg)
+            if self._logger is not None:
+                self._logger.log(*((level, msg,) + args), **kwargs)
 
     return AsyncStompPublisher()
 

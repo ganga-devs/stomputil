@@ -12,3 +12,12 @@ class NotConnectedException(Exception):
     connection.
     """
     pass
+
+
+#http://code.google.com/p/stomppy/issues/detail?id=4
+class ReconnectFailedException(Exception):
+    """
+    Raised by Connection.__attempt_connection when reconnection attempts
+    have exceeded Connection.__reconnect_attempts_max.
+    """
+    pass

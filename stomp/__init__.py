@@ -30,6 +30,9 @@
     * patch from Fernando
     * patches from Eugene Strulyov
 
+    N.B. This version of stomp.py is patched for the following issues: 4, 11, 14.
+    See http://code.google.com/p/stomppy/issues/list?can=1 for more details.
+
 """
 
 __version__ = '2.0.4'

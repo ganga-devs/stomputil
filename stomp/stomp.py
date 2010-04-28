@@ -84,6 +84,8 @@ class Connection(object):
                  reconnect_sleep_increase = 0.5,
                  reconnect_sleep_jitter = 0.1,
                  reconnect_sleep_max = 60.0,
+                 #http://code.google.com/p/stomppy/issues/detail?id=4 (next line)
+                 reconnect_attempts_max = 3,
                  use_ssl = False,
                  ssl_key_file = None,
                  ssl_cert_file = None,
@@ -206,7 +208,9 @@ class Connection(object):
         self.__reconnect_sleep_increase = reconnect_sleep_increase
         self.__reconnect_sleep_jitter = reconnect_sleep_jitter
         self.__reconnect_sleep_max = reconnect_sleep_max
-        
+        #http://code.google.com/p/stomppy/issues/detail?id=4
+        self.__reconnect_attempts_max = reconnect_attempts_max
+
         self.__connect_headers = {}
         if user is not None and passcode is not None:
             self.__connect_headers['login'] = user
@@ -240,7 +244,10 @@ class Connection(object):
         """
         self.__running = True
         self.__attempt_connection()
-        thread.start_new_thread(self.__receiver_loop, ())
+        #http://code.google.com/p/stomppy/issues/detail?id=14 (next 3 lines)
+        #thread.start_new_thread(self.__receiver_loop, ())
+        thread = threading.Thread(None, self.__receiver_loop)
+        thread.start()
 
     def stop(self):
         """
@@ -428,10 +435,19 @@ class Connection(object):
                 continue
 
             notify_func = getattr(listener, 'on_%s' % frame_type)
-            params = len(notify_func.func_code.co_varnames)
-            if params >= 2:
+            
+            #http://code.google.com/p/stomppy/issues/detail?id=4 (next 14 lines)
+            #params = len(notify_func.func_code.co_varnames)
+            #if params >= 2:
+            #    notify_func(headers, body)
+            #elif params == 1:
+            #    notify_func(headers)
+            #else:
+            #    notify_func()
+            params = notify_func.func_code.co_argcount
+            if params >= 3:
                 notify_func(headers, body)
-            elif params == 1:
+            elif params == 2:
                 notify_func(headers)
             else:
                 notify_func()
@@ -618,7 +634,10 @@ class Connection(object):
         """
 
         sleep_exp = 1
-        while self.__running and self.__socket is None:
+        #http://code.google.com/p/stomppy/issues/detail?id=4 (next 3 lines)
+        connect_count = 0
+        #while self.__running and self.__socket is None:
+        while self.__running and self.__socket is None and connect_count < self.__reconnect_attempts_max:
             for host_and_port in self.__host_and_ports:
                 try:
                     log.debug("Attempting connection to host %s, port %s" % host_and_port)
@@ -652,6 +671,8 @@ class Connection(object):
                         exc = sys.exc_info()[1][1]
                     else:
                         exc = sys.exc_info()[1]
+                    #http://code.google.com/p/stomppy/issues/detail?id=4 (next line)
+                    connect_count += 1
                     log.warning("Could not connect to host %s, port %s: %s" % (host_and_port[0], host_and_port[1], exc))
 
             if self.__socket is None:
@@ -667,6 +688,9 @@ class Connection(object):
                 if sleep_duration < self.__reconnect_sleep_max:
                     sleep_exp += 1
 
+        #http://code.google.com/p/stomppy/issues/detail?id=4 (next 2 lines)
+        if not self.__socket:
+            raise ReconnectFailedException
 
 #
 # command line testing
