@@ -40,6 +40,8 @@ class LoggerListener(stomp.ConnectionListener):
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug('STOMP %s frame received headers=%s body=%s.' % (frame_type, headers, body))
 
+# counter to give unique thread names
+_thread_id = 0
 
 def createPublisher(T, server, port, user='', password='', logger=None,
                     idle_timeout=IDLE_TIMEOUT):
@@ -71,16 +73,19 @@ def createPublisher(T, server, port, user='', password='', logger=None,
         p.send('/topic/ganga.dashboard.test', 'Hello World!')
         #GangaThreadPool calls p.stop() during shutdown
     """
+    
+    # increment thread id
+    global _thread_id
+    _thread_id += 1
 
     class AsyncStompPublisher(T):
         """Asynchronous asynchronous publisher for sending messages to an MSG server."""
 
         def __init__(self):
-            T.__init__(self, name=('AsyncStompPublisher_%s:%s' % (server, port)))
+            T.__init__(self, name=('AsyncStompPublisher_%s_%s:%s' % (_thread_id, server, port)))
             self.setDaemon(True)
             # indicates that the publisher thread should exit
             self.__should_stop = False
-            self.__stop_timestamp = None
             # indicates that publisher is currently sending
             self.__sending = False
             # connection
