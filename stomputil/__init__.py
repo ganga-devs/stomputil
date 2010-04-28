@@ -9,6 +9,7 @@ Changes in version 2.2:
 - Re-queue message and back-off on connect/send failure.
 - Exit if requested to stop and in back-off mode.
 - Refuse to queue messages during or after thread shutdown.
+- Name publisher threads uniquely (within process).
 - Apply patches to stomp.py 2.0.4 for the following issues: 4, 11, 14.
     These patches are included in the upcoming stomp.py 3.0.1 release.
     See http://code.google.com/p/stomppy/issues/list?can=1 for more details.
