@@ -40,4 +40,4 @@ Changes in version 2.0:
 
 from publisher import createPublisher
 
-__version__ = '2.2'
+__version__ = '2.3'
