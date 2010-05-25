@@ -25,7 +25,7 @@ class LoggerListener(stomp.ConnectionListener):
         self._log_frame('CONNECTED', headers, body)
 
     def on_disconnected(self):
-        self._logger.warning('TCP/IP connection lost.')
+        self._logger.debug('TCP/IP connection lost.')
 
     def on_message(self, headers, body):
         self._log_frame('MESSAGE', headers, body)
@@ -120,7 +120,7 @@ def createPublisher(T, server, port, user='', password='', logger=None,
             N.B. keyword_headers take precedence over headers.
             """
             if self.should_stop():
-                self._log(logging.WARNING, 'Request to queue message during or after thread shutdown denied.')
+                self._log(logging.DEBUG, 'Request to queue message during or after thread shutdown denied.')
                 return
             if headers is None:
                 headers = {}
@@ -164,7 +164,7 @@ def createPublisher(T, server, port, user='', password='', logger=None,
                     try:
                         cx.disconnect()
                     except Exception:
-                        self._log(logging.WARNING, 'Exception on disconnect.', exc_info=True)
+                        self._log(logging.DEBUG, 'Exception on disconnect.', exc_info=True)
                 self._log(logging.DEBUG, 'Disconnected')
 
         def run(self):
@@ -193,7 +193,7 @@ def createPublisher(T, server, port, user='', password='', logger=None,
                                 # reset backoff_time
                                 backoff_time = 0
                             except Exception:
-                                self._log(logging.WARNING, 'Exception on connect/send.', exc_info=True)
+                                self._log(logging.DEBUG, 'Exception on connect/send.', exc_info=True)
                                 # increment backoff_time
                                 if backoff_time == 0:
                                     backoff_time = self.backoff_initial
