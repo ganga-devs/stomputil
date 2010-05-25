@@ -2,6 +2,9 @@
 
 The wrapper adds asynchronicity and connection management.
 
+Changes in version 2.3:
+- Set logging level for non-user messages to debug.
+
 Changes in version 2.2:
 - Never restart stomp.Connection to fix the following Ganga issue:
     #62543 Exception in thread GANGA_Update_Thread_shutdown
