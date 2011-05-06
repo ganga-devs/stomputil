@@ -335,7 +335,7 @@ class Connection(object):
         self.__send_frame_helper('CONNECT', '', self.__merge_headers([self.__connect_headers, headers, keyword_headers]), [ ])
         
     def disconnect(self, headers={}, **keyword_headers):
-        self.__send_frame_helper('DISCONNECT', '', self.__merge_headers([self.__connect_headers, headers, keyword_headers]), [ ])
+        self.__send_frame_helper('DISCONNECT', '', self.__merge_headers([headers, keyword_headers]), [ ])
         self.__running = False
         
         if self.__socket is not None:
